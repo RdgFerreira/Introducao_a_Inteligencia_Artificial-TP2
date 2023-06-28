@@ -15,7 +15,7 @@ if __name__ == '__main__':
         print("Usage: python3 TP2.py <input_file> <output_file>")
         sys.exit(1)
     
-    input_file_name = sys.argv[1]
+    input_file_name = sys.argv[1] 
     output_file_name = sys.argv[2]
 
     f = open(input_file_name, "r")
