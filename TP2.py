@@ -34,7 +34,7 @@ def init(N):
 
 def animate(i):
     data = data_list[i]
-    if i % 5 == 0: print(i)
+    # if i % 5 == 0: print(i)
     sns.heatmap(data, square=True, cbar=False)
 
 # Classe QSlot encapsula dados e operações úteis para cada estado s do QGrid
@@ -55,16 +55,8 @@ class QSlot():
             LEFT: leftValue
         }
 
-        # Lista de ações possíveis para o estado s
-        self.actionsList = list(self.av.keys())
-
-        # Valor de recompensa terminal para o estado s.
+        # Valor de recompensa para o estado s.
         self.reward = np.float128(rewardValue)
-
-    # Retorna o valor de Q(s,a) para a ação a. Se for terminal, retorna o valor de recompensa.
-    def getQValueFrom(self, isTerminal, action):
-        if isTerminal: return self.rewardValue
-        else: return self.av[action]
     
     # Atualiza o valor de Q(s,a) para a ação a conforme a equação descrita no algoritmo de Q-Learning
     # Q(s,a) = Q(s,a) + alpha * (reward + gamma * argmax_a(Q(s',a')) - Q(s,a))
@@ -84,6 +76,10 @@ class QLearn():
         # Estado corrente do agente, também uma lista [x, y] com as coordenadas no QGrid
         self.s_xy = [-1, -1]
 
+        # Lista de ações possíveis para os estados não terminais e não obstáculos
+        self.actionsList = [UP, DOWN, LEFT, RIGHT]
+
+        self.totalReward = 0
 
     # Inicializa Q(s,a) para todos os estados e ações de acordo com o Grid de entrada
     # e inicializa o estado inicial e corrente do agente
@@ -121,12 +117,7 @@ class QLearn():
     # Método que escolhe aleatoriamente uma ação possível para o estado corrente do agente.
     # Note que o agente pode escorregar após a escolha de uma ação aleatória.
     def randomAction(self):
-        action = random.randint(1, 4)
-
-        if action == 1: return UP
-        elif action == 2: return RIGHT
-        elif action == 3: return DOWN
-        elif action == 4: return LEFT
+        action = self.actionsList[random.randint(0, 3)]
 
         action = self.slip(action)
         return action
@@ -134,8 +125,8 @@ class QLearn():
     # Método que escolhe a melhor ação possível para o estado corrente do agente.
     # A melhor ação é aquela que maximiza o valor de Q(s,a) para o estado corrente.
     def bestAction(self, s, toSlip):
-        action = s.actionsList[random.randint(0, 3)]
-        for newBestAction in s.actionsList:
+        action = self.actionsList[random.randint(0, 3)]
+        for newBestAction in self.actionsList:
             if s.av[newBestAction] > s.av[action]: action = newBestAction
         
         if toSlip: action = self.slip(action)
@@ -179,19 +170,15 @@ class QLearn():
     # Primeiro seleciona uma ação randômica (randomAction) ou não (bestAction) de acordo com o fator epsilon.
     # Depois executa a ação escolhida e atualiza os valores de Q(s,a) de acordo com
     # a regra de atualização do algoritmo Q-Learning (updateQValue).
-    def QIter(self, f):
+    def QIter(self):
         s = self.QGrid[self.s_xy[0]][self.s_xy[1]]
         if epsilon != -1:
             if random.random() < epsilon: a = self.randomAction()
             else: a = self.bestAction(s, True)
         else: a = self.bestAction(s, True)
-        before = self.s_xy.copy()
-        f.write("Action: " + str(a) + "\n")
-        f.write(f"Current Q values for [{self.s_xy[0]}, {self.s_xy[1]}]: {s.av}\n")
 
         # Executa a ação a no estado s e recupera o label da casa para onde o agente se moveu
         agentIn = self.executeAction(a)
-        f.write(str(Grid) + "\n")
         # Registra o estado do Grid após a execução da ação
         data_list.append(Grid.copy())
 
@@ -199,6 +186,7 @@ class QLearn():
         sNext = self.QGrid[self.s_xy[0]][self.s_xy[1]]
         # Observa a recompensa r para o novo estado s'
         r = sNext.reward
+        self.totalReward += r
         if agentIn == GOAL or agentIn == DEFEAT:
             # s' é terminal. Atualiza Q(s,a) e reinicia o episódio,
             # voltando o agente para a posição inicial.
@@ -218,7 +206,6 @@ class QLearn():
         # nextBestActionQValue já recupera o valor de Q(s',a'), que é o máximo.
         sNextBestActionQValue = sNext.av[self.bestAction(sNext, False)]
         s.updateQValue(a, sNextBestActionQValue, r)
-        f.write(f"Modified Q values for [{before[0]}, {before[1]}]: {s.av}\n\n")
 
 if __name__ == '__main__':
     if len(sys.argv) != 3:
@@ -252,29 +239,32 @@ if __name__ == '__main__':
     # Inicialização e execução do algoritmo Q-Learning.
     q = QLearn()
     q.initializeQ()
-    f = open("output.txt", "w")
-    f.write(str(Grid) + "\n")
-    for _ in range(nIters): q.QIter(f)
-    f.close()
+    for _ in range(nIters): q.QIter()
+
+    # print(f"Average Reward: {q.totalReward / nIters}")
+    Grid = Grid.astype(np.float128)
 
     # Grid NxN que indicará a melhor ação para cada casa do Grid
-    bestActionsLabels = [['n' for _ in range(N)] for _ in range(N)]
+    # e adaptação do Grid de entrada para conter os melhores Q(s,a)
+    # para cada casa s
+    bestActionsLabels = [[NONE for _ in range(N)] for _ in range(N)]
     for i in range(N):
         for j in range(N):
-            slot = q.QGrid[i][j].id
-            print(f"action values for {[i, j]}: {q.QGrid[i][j].av}")
-            Grid[i][j] = slot
-            if slot == AGENT or slot == GROUND:
-                bestActionsLabels[i][j] = q.bestAction(q.QGrid[i][j], False)
+            slot = q.QGrid[i][j]
+            Grid[i][j] = slot.reward
+            if slot.id == AGENT or slot.id == GROUND:
+                bestActionsLabels[i][j] = q.bestAction(slot, False)
+                Grid[i][j] = slot.av[bestActionsLabels[i][j]]
 
+    # print(Grid)
     # Criação da imagem com as melhores ações para cada estado do Grid
     sns.heatmap(Grid, cbar=True, square=True, annot=bestActionsLabels, fmt='')
-    plt.savefig(output_file_name + "_acoes.png")
+    plt.savefig("saidas/" + output_file_name + "_acoes.png")
 
-    # Criação do GIF
-    # data_list.append(np.zeros((N, N)))
-    # data_list.append(np.zeros((N, N)))
-    # fig = plt.figure()
-    # anim = animation.FuncAnimation(fig, animate, init_func=init(N), frames=len(data_list), repeat=False)
-    # pillowwriter = animation.PillowWriter(fps=7)
-    # anim.save(output_file_name + ".gif", writer=pillowwriter)
+    # Criação do GIF com dois frames limpos ao final para clarear o fim do GIF
+    data_list.append(np.zeros((N, N)))
+    data_list.append(np.zeros((N, N)))
+    fig = plt.figure()
+    anim = animation.FuncAnimation(fig, animate, init_func=init(N), frames=len(data_list), repeat=False)
+    pillowwriter = animation.PillowWriter(fps=7)
+    anim.save("saidas/" + output_file_name + ".gif", writer=pillowwriter)
